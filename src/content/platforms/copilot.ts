@@ -39,7 +39,7 @@ export class CopilotAdapter extends BasePlatformAdapter {
     // Copilot URL doesn't always have a conversation ID in the path
     // Fall back to a search param or generate from page state
     const match = window.location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/);
-    if (match) return match[1];
+    if (match?.[1]) return match[1];
 
     const threadParam = new URL(window.location.href).searchParams.get("threadId");
     return threadParam ?? null;

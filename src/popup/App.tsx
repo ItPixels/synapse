@@ -119,7 +119,7 @@ export function App() {
         </button>
         <button
           type="button"
-          onClick={() => chrome.sidePanel?.open?.({})}
+          onClick={() => chrome.sidePanel?.open?.({ windowId: chrome.windows?.WINDOW_ID_CURRENT })}
           className="flex-1 text-xs py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           Open Panel

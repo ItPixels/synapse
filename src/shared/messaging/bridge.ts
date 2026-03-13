@@ -11,7 +11,7 @@ export function sendToBackground<T extends keyof ContentToBackgroundMessages>(
   type: T,
   payload: ContentToBackgroundMessages[T],
 ): Promise<void> {
-  return chrome.runtime.sendMessage({ type, payload } satisfies TypedMessage<T>);
+  return chrome.runtime.sendMessage({ type, payload } as TypedMessage<T>);
 }
 
 /**
@@ -22,7 +22,7 @@ export function sendToContent<T extends keyof BackgroundToContentMessages>(
   type: T,
   payload: BackgroundToContentMessages[T],
 ): Promise<void> {
-  return chrome.tabs.sendMessage(tabId, { type, payload } satisfies TypedMessage<T>);
+  return chrome.tabs.sendMessage(tabId, { type, payload } as TypedMessage<T>);
 }
 
 /**

@@ -1,6 +1,11 @@
 import { type ConversationRecord, db } from "@/shared/db/dexie-schema";
 import type { ContextCard } from "@/shared/types";
 import { supabase } from "./supabase";
+import type { Database } from "./supabase-types";
+
+type ConversationRow = Database["public"]["Tables"]["conversations"]["Row"];
+type ConversationInsert = Database["public"]["Tables"]["conversations"]["Insert"];
+type ContextCardInsert = Database["public"]["Tables"]["context_cards"]["Insert"];
 
 /**
  * Sync status tracking.
@@ -43,14 +48,13 @@ async function pushToRemote(userId: string): Promise<{ pushed: number; errors: s
   const errors: string[] = [];
   let pushed = 0;
 
-  // Get conversations that need syncing
   const pendingConvs = await db.conversations
     .where("syncStatus")
     .anyOf(["local", "pending"])
     .toArray();
 
   for (const conv of pendingConvs) {
-    const { error } = await supabase.from("conversations").upsert({
+    const row: ConversationInsert = {
       id: conv.id,
       user_id: userId,
       platform: conv.platform,
@@ -65,18 +69,19 @@ async function pushToRemote(userId: string): Promise<{ pushed: number; errors: s
       is_favorite: conv.isFavorite,
       created_at: new Date(conv.createdAt).toISOString(),
       updated_at: new Date(conv.updatedAt).toISOString(),
-    });
+    };
+
+    const { error } = await supabase.from("conversations").upsert(row as never);
 
     if (error) {
       errors.push(`Push conversation ${conv.id}: ${error.message}`);
       continue;
     }
 
-    // Push linked context card if it exists
     if (conv.contextCardId) {
       const card = await db.contextCards.get(conv.contextCardId);
       if (card) {
-        const { error: cardError } = await supabase.from("context_cards").upsert({
+        const cardRow: ContextCardInsert = {
           id: card.id,
           user_id: userId,
           conversation_id: card.conversationId,
@@ -88,7 +93,9 @@ async function pushToRemote(userId: string): Promise<{ pushed: number; errors: s
           intent: card.intent,
           continuation_hints: card.continuationHints,
           created_at: new Date(card.createdAt).toISOString(),
-        });
+        };
+
+        const { error: cardError } = await supabase.from("context_cards").upsert(cardRow as never);
 
         if (cardError) {
           errors.push(`Push card ${card.id}: ${cardError.message}`);
@@ -97,7 +104,6 @@ async function pushToRemote(userId: string): Promise<{ pushed: number; errors: s
       }
     }
 
-    // Mark as synced
     await db.conversations.update(conv.id, { syncStatus: "synced" });
     pushed++;
   }
@@ -112,13 +118,11 @@ async function pullFromRemote(userId: string): Promise<{ pulled: number; errors:
   const errors: string[] = [];
   let pulled = 0;
 
-  // Get the latest local update timestamp for incremental sync
   const latestLocal = await db.conversations.orderBy("updatedAt").reverse().first();
   const since = latestLocal
     ? new Date(latestLocal.updatedAt).toISOString()
     : "1970-01-01T00:00:00Z";
 
-  // Fetch remote conversations updated after our latest
   const { data: remoteConvs, error: convError } = await supabase
     .from("conversations")
     .select("*")
@@ -132,10 +136,11 @@ async function pullFromRemote(userId: string): Promise<{ pulled: number; errors:
     return { pulled, errors };
   }
 
-  for (const remote of remoteConvs ?? []) {
+  const rows = (remoteConvs ?? []) as ConversationRow[];
+
+  for (const remote of rows) {
     const local = await db.conversations.get(remote.id);
 
-    // Skip if local version is newer
     if (local && local.updatedAt >= new Date(remote.updated_at).getTime()) {
       continue;
     }
@@ -162,9 +167,8 @@ async function pullFromRemote(userId: string): Promise<{ pulled: number; errors:
     pulled++;
   }
 
-  // Pull context cards for pulled conversations
   if (pulled > 0) {
-    const convIds = (remoteConvs ?? []).map((c) => c.id);
+    const convIds = rows.map((c) => c.id);
     const { data: remoteCards, error: cardError } = await supabase
       .from("context_cards")
       .select("*")
@@ -174,7 +178,8 @@ async function pullFromRemote(userId: string): Promise<{ pulled: number; errors:
     if (cardError) {
       errors.push(`Pull cards: ${cardError.message}`);
     } else {
-      for (const rc of remoteCards ?? []) {
+      for (const rc of (remoteCards ??
+        []) as Database["public"]["Tables"]["context_cards"]["Row"][]) {
         const card: ContextCard = {
           id: rc.id,
           conversationId: rc.conversation_id,
@@ -185,7 +190,9 @@ async function pullFromRemote(userId: string): Promise<{ pulled: number; errors:
           entities: rc.entities,
           intent: rc.intent as ContextCard["intent"],
           continuationHints: rc.continuation_hints,
+          quality: "brief",
           createdAt: new Date(rc.created_at).getTime(),
+          expiresAt: null,
         };
 
         await db.contextCards.put(card);
@@ -209,7 +216,7 @@ export async function syncConversation(conversationId: string): Promise<boolean>
   const conv = await db.conversations.get(conversationId);
   if (!conv) return false;
 
-  const { error } = await supabase.from("conversations").upsert({
+  const row: ConversationInsert = {
     id: conv.id,
     user_id: user.id,
     platform: conv.platform,
@@ -224,8 +231,9 @@ export async function syncConversation(conversationId: string): Promise<boolean>
     is_favorite: conv.isFavorite,
     created_at: new Date(conv.createdAt).toISOString(),
     updated_at: new Date(conv.updatedAt).toISOString(),
-  });
+  };
 
+  const { error } = await supabase.from("conversations").upsert(row as never);
   if (error) return false;
 
   await db.conversations.update(conversationId, { syncStatus: "synced" });
